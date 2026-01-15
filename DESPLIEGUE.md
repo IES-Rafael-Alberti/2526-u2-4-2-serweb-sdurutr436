@@ -68,13 +68,69 @@ Este documento recopila todas las evidencias y respuestas de la practica.
 ## Parte 2 — Evaluacion RA2 (a–j)
 
 ### a) Parametros de administracion
-- Respuesta: Los parámetros de administración de Nginx están configurados en el archivo `default.conf`, que incluye directivas como `listen 80` y `listen 443 ssl` para los puertos HTTP/HTTPS, `root` para el directorio raíz del contenido web, `ssl_certificate` y `ssl_certificate_key` para la configuración de certificados SSL, y bloques `location` para el manejo de rutas. Estos parámetros permiten controlar cómo Nginx atiende solicitudes, sirve contenido estático y gestiona certificados de seguridad. La configuración se valida con `nginx -t` dentro del contenedor.
-- Evidencias: (No disponibles en carpeta evidencias)
+- Respuesta: Los parámetros de administración más importantes de Nginx están configurados en `/etc/nginx/nginx.conf`. A continuación se detallan las directivas clave localizadas:
+
+**1. worker_processes** (línea 3: `worker_processes auto;`)
+- **Qué controla:** Define el número de procesos worker que Nginx ejecuta para atender peticiones. El valor `auto` ajusta automáticamente el número según los núcleos del CPU disponibles.
+- **Configuración incorrecta:** Establecer `worker_processes 1;` en un servidor con múltiples núcleos limitaría el rendimiento, ya que solo un core procesaría todas las peticiones, creando un cuello de botella en servidores con alta concurrencia.
+- **Cómo comprobarlo:** `grep -n worker_processes /etc/nginx/nginx.conf` y validar con `nginx -t`.
+
+**2. worker_connections** (línea 5: `worker_connections 1024;`)
+- **Qué controla:** Número máximo de conexiones simultáneas que puede manejar cada proceso worker. Con 1024 conexiones por worker, si tienes 4 workers, soportas hasta 4096 conexiones concurrentes.
+- **Configuración incorrecta:** Establecer `worker_connections 10;` causaría errores "worker_connections are not enough" en los logs cuando se alcancen más de 10 conexiones simultáneas por worker, rechazando nuevas peticiones.
+- **Cómo comprobarlo:** `grep -n worker_connections /etc/nginx/nginx.conf` y monitorizar logs con `tail -f /var/log/nginx/error.log`.
+
+**3. access_log** (línea 10: `access_log /var/log/nginx/access.log;`)
+- **Qué controla:** Ruta del archivo donde se registran todas las peticiones HTTP exitosas (GET, POST, códigos 200, 301, 404, etc.), incluyendo IP, método, URL y código de respuesta.
+- **Configuración incorrecta:** Establecer `access_log off;` desactivaría completamente el registro de accesos, imposibilitando auditorías, análisis de tráfico o detección de patrones de ataque.
+- **Cómo comprobarlo:** `ls -lh /var/log/nginx/access.log` y verificar que el archivo crece con `tail -f /var/log/nginx/access.log` mientras se generan peticiones.
+
+**4. error_log** (línea 15: `error_log /var/log/nginx/error.log warn;`)
+- **Qué controla:** Ruta y nivel de verbosidad del log de errores (debug, info, notice, warn, error, crit, alert, emerg). El nivel `warn` registra advertencias y errores más graves.
+- **Configuración incorrecta:** Establecer `error_log /dev/null;` descartaría todos los errores, dificultando enormemente el diagnóstico de problemas de configuración, permisos o caídas del servicio.
+- **Cómo comprobarlo:** `tail -f /var/log/nginx/error.log` y provocar un error (ej: solicitar una ruta inexistente o crear un error de sintaxis en la configuración).
+
+**5. keepalive_timeout** (línea 22: `keepalive_timeout 65;`)
+- **Qué controla:** Tiempo en segundos que el servidor mantiene abierta una conexión HTTP persistente esperando nuevas peticiones del mismo cliente antes de cerrarla.
+- **Configuración incorrecta:** Establecer `keepalive_timeout 0;` desactivaría las conexiones persistentes, obligando a crear una nueva conexión TCP para cada recurso (HTML, CSS, JS, imágenes), aumentando drásticamente la latencia y el uso de CPU.
+- **Cómo comprobarlo:** `grep -n keepalive_timeout /etc/nginx/nginx.conf` y observar los headers HTTP con `curl -I` (buscar `Connection: keep-alive`).
+
+**6. include** (líneas 27 y 29: `include /etc/nginx/mime.types;` e `include /etc/nginx/conf.d/*.conf;`)
+- **Qué controla:** Permite cargar configuración desde archivos externos. `mime.types` define los tipos MIME (text/html, image/png, etc.) y `conf.d/*.conf` carga configuraciones de sitios virtuales.
+- **Configuración incorrecta:** Omitir `include /etc/nginx/mime.types;` haría que Nginx sirva todos los archivos como `application/octet-stream`, provocando que los navegadores descarguen archivos CSS/JS en lugar de interpretarlos.
+- **Cómo comprobarlo:** `ls -l /etc/nginx/conf.d/` para verificar archivos cargados y `curl -I http://localhost` para inspeccionar el header `Content-Type`.
+
+**7. gzip** (línea 31: `# gzip on;`)
+- **Qué controla:** Activa la compresión gzip de respuestas HTTP, reduciendo el ancho de banda y mejorando tiempos de carga. Está comentado por defecto en nginx:alpine.
+- **Configuración incorrecta:** Activar `gzip on;` sin especificar `gzip_types` limitaría la compresión solo a `text/html`, desperdiciando la oportunidad de comprimir CSS, JavaScript y JSON.
+- **Cómo comprobarlo:** `curl -H "Accept-Encoding: gzip" -I http://localhost` y buscar el header `Content-Encoding: gzip` en la respuesta.
+
+**Cambio aplicado:**
+Se validó la configuración por defecto de `keepalive_timeout 65;` ejecutando `nginx -t` para verificar la sintaxis y `nginx -s reload` para aplicar cualquier cambio en la configuración de forma segura sin interrumpir el servicio. No se realizó modificación del valor ya que 65 segundos es óptimo para aplicaciones web estáticas.
+
+- Evidencias:
+
+![Grep de nginxconf](evidencias/evidencias-parte2/a-01-grep-nginxconf.png)
+
+![Nginx estado](evidencias/evidencias-parte2/a-02-nginx-t.png)
+
+![Reload del contenedor](evidencias/evidencias-parte2/a-03-reload.png)
 
 ### b) Ampliacion de funcionalidad + modulo investigado
-- Opcion elegida (B1 o B2): **B2 - Módulos de compresión y seguridad HTTP (Headers)**
-- Respuesta: Se implementó la ampliación de funcionalidad agregando módulos de compresión (gzip) para optimizar la transferencia de contenido, reduciendo el tamaño de las respuestas HTTP, y módulos de seguridad mediante headers HTTP personalizados como `Strict-Transport-Security`, `X-Content-Type-Options` y `X-Frame-Options` para proteger contra ataques comunes. Estos módulos están compilados de forma nativa en la imagen `nginx:alpine` y se configuran directamente en `default.conf`.
-- Evidencias (B1 o B2): (No disponibles en carpeta evidencias)
+- Opcion elegida (B1 o B2): **B2 - Cabeceras de seguridad HTTP**
+- Respuesta: Se implementó la ampliación de funcionalidad mediante la configuración de cabeceras HTTP de seguridad personalizadas. Se agregaron tres cabeceras esenciales: `X-Content-Type-Options: nosniff` para prevenir ataques de MIME-sniffing donde el navegador intenta "adivinar" el tipo de contenido; `X-Frame-Options: DENY` para prevenir ataques de clickjacking impidiendo que la página se cargue en un iframe; y `Content-Security-Policy` para controlar qué recursos pueden cargarse en la página, mitigando ataques XSS (Cross-Site Scripting). Estas cabeceras se configuran directamente en el bloque `server` de `default.conf` usando la directiva `add_header` con el flag `always` para asegurar que se incluyan en todas las respuestas.
+- Evidencias (B1 o B2):
+
+```bash
+  # Cabeceras de seguridad
+  add_header X-Content-Type-Options "nosniff" always;
+  add_header X-Frame-Options "DENY" always;
+  add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';" always;
+```
+
+![Estado de nginx](evidencias/evidencias-parte2/b-02-nginx-t.png)
+
+![Curl de los heads](evidencias/evidencias-parte2/b-03-curl-http-headers.png)
 
 #### Modulo investigado: Modulos de Headers de Seguridad HTTP
 - Para que sirve: Estos módulos permiten agregar headers HTTP personalizados a las respuestas del servidor para mejorar la seguridad. Por ejemplo: `Strict-Transport-Security` (HSTS) fuerza el uso de HTTPS en futuras solicitudes, `X-Content-Type-Options: nosniff` previene ataques de MIME-sniffing, y `X-Frame-Options: DENY` previene clickjacking.
@@ -82,20 +138,220 @@ Este documento recopila todas las evidencias y respuestas de la practica.
 - Fuente(s): Documentación oficial de Nginx - http://nginx.org/en/docs/http/ngx_http_headers_module.html
 
 ### c) Sitios virtuales / multi-sitio
-- Respuesta: Se ha implementado un despliegue multi-sitio donde Nginx sirve dos aplicaciones web independientes desde el mismo contenedor: la aplicación principal (CloudAcademy) en la raíz (`/`) y una aplicación secundaria (Reloj) en la subcarpeta (`/reloj`). Ambos sitios comparten el mismo volumen (`./www`) y se acceden a través del mismo host pero en rutas diferentes, siendo un ejemplo de uso de host virtual basado en rutas en lugar de dominios.
-- Evidencias: (No disponibles en carpeta evidencias)
+- Respuesta: Se ha implementado un despliegue multi-sitio donde Nginx sirve dos aplicaciones web independientes desde el mismo contenedor: la aplicación principal (CloudAcademy) en la raíz (`/`) y una aplicación secundaria (Reloj) en la subcarpeta (`/reloj`). Ambos sitios comparten el mismo **volumen nombrado `shared-data`** definido en `docker-compose.yml`, que se monta en `/usr/share/nginx/html` (Nginx) y `/home/daw/upload` (SFTP). Los sitios se acceden a través del mismo host pero en rutas diferentes, siendo un ejemplo de **multi-sitio por path** (basado en rutas) en lugar de por nombre de dominio.
+
+**Diferencias entre tipos de multi-sitio:**
+- **Multi-sitio por path:** Usa la misma dirección IP/dominio pero diferentes rutas (ej: `localhost:8443/` y `localhost:8443/reloj`). Se configura con bloques `location` en el mismo `server` block.
+- **Multi-sitio por nombre (server_name):** Múltiples dominios apuntando a la misma IP, cada uno con su propio `server` block diferenciado por la directiva `server_name` (ej: `site1.com` y `site2.com`).
+
+**Otros tipos de multi-sitio:**
+- **Por puerto:** Diferentes aplicaciones escuchando en puertos distintos (ej: `listen 80;` vs `listen 8080;`), cada uno con su propio `server` block.
+- **Por IP:** Servidor con múltiples IPs, cada aplicación configurada con `listen IP:puerto;` específico.
+- **Por subdominios:** Variante de multi-sitio por nombre usando subdominios (ej: `blog.example.com`, `shop.example.com`), diferenciados con `server_name` usando wildcards o nombres explícitos.
+
+**Configuración activa en default.conf:**
+```nginx
+server {
+  listen 443 ssl;
+  server_name localhost;
+  
+  root /usr/share/nginx/html;  # Directorio raíz donde están los archivos
+  index index.html;             # Archivo por defecto
+  
+  location / {                  # Bloque para el sitio principal
+    try_files $uri $uri/ =404;  # Intenta servir archivo, luego directorio, sino 404
+  }
+  
+  location /reloj {             # Bloque específico para la aplicación en /reloj
+    try_files $uri $uri/ =404;  # Busca archivos en /usr/share/nginx/html/reloj/
+  }
+}
+```
+
+Las directivas clave son:
+- **root:** Define el directorio base desde donde Nginx sirve archivos (`/usr/share/nginx/html`)
+- **location:** Define bloques de configuración para rutas específicas (`/` para raíz, `/reloj` para subcarpeta)
+- **try_files:** Intenta servir el archivo solicitado, si no existe intenta como directorio, y si tampoco existe retorna 404
+
+- Evidencias:
+
+![Pagina root (Web Academy)](evidencias/evidencias-parte2/c-01-root.png)
+
+![Pagina reloj](evidencias/evidencias-parte2/c-02-reloj.png)
+
+![Demostración del interior de defaultconf](evidencias/evidencias-parte2/c-03-defaultconf-inside.png)
 
 ### d) Autenticacion y control de acceso
 - Respuesta: Se implementó autenticación básica HTTP en Nginx para proteger rutas específicas del servidor. Se crea un archivo `.htpasswd` que contiene usuarios y contraseñas encriptadas usando bcrypt. Luego, en `default.conf`, se agregan directivas `auth_basic` y `auth_basic_user_file` en los bloques `location` para proteger recursos específicos, requiriendo credenciales válidas antes de permitir el acceso. Por ejemplo, la ruta `/admin` podría requerir autenticación mientras que la raíz de la web permanece pública.
-- Evidencias: (No disponibles en carpeta evidencias)
+- Evidencias:
+
+```bash
+PS C:\Users\Sergio\Documents\DAW_2\DW_Despliegue\2526-u2-4-2-serweb-sdurutr436> Get-Content webdata\admin\index.html
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Panel de AdministraciÃ³n</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .admin-panel {
+            background: white;
+            padding: 40px;
+            border-radius: 10px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+            text-align: center;
+            max-width: 500px;
+        }
+        h1 {
+            color: #667eea;
+            margin-bottom: 20px;
+        }
+        p {
+            color: #666;
+            line-height: 1.6;
+        }
+        .success {
+            background: #4CAF50;
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="admin-panel">
+        <h1>ðŸ”’ Panel de AdministraciÃ³n</h1>
+        <p>Has accedido exitosamente al Ã¡rea protegida.</p>
+        <p>Esta secciÃ³n requiere autenticaciÃ³n HTTP bÃ¡sica para prevenir accesos no autorizados.</p>
+        <div class="success">
+            âœ“ AutenticaciÃ³n exitosa
+        </div>
+    </div>
+</body>
+</html>
+PS C:\Users\Sergio\Documents\DAW_2\DW_Despliegue\2526-u2-4-2-serweb-sdurutr436>
+```
+
+![Configuracion de autenticación default](evidencias/evidencias-parte2/d-02-defaultconf-auth.png)
+
+![Acceso sin credenciales](evidencias/evidencias-parte2/d-03-curl-401.png)
+
+![Acceso con credenciales](evidencias/evidencias-parte2/d-04-curl-200.png)
+
 
 ### e) Certificados digitales
-- Respuesta: Se generaron certificados SSL autofirmados (nginx-selfsigned.crt y nginx-selfsigned.key) utilizando OpenSSL. Estos certificados se almacenan en la carpeta `./certs/` del host y se montan como volúmenes en el contenedor Nginx en las rutas `/etc/ssl/certs/` y `/etc/ssl/private/`. La configuración en `default.conf` referencia estos certificados mediante las directivas `ssl_certificate` y `ssl_certificate_key`, permitiendo que Nginx sirva contenido por HTTPS en el puerto 443.
-- Evidencias: (No disponibles en carpeta evidencias)
+- Respuesta: Los certificados digitales SSL/TLS permiten establecer comunicaciones cifradas entre el cliente y el servidor mediante HTTPS. En este proyecto se generaron certificados autofirmados utilizando OpenSSL.
+
+**¿Qué es cada archivo?**
+- **`.crt` (Certificate):** Archivo que contiene el certificado público. Incluye información como el dominio, organización, fecha de validez y la clave pública. El navegador recibe este archivo para validar la identidad del servidor y establecer el cifrado.
+- **`.key` (Private Key):** Archivo que contiene la clave privada correspondiente al certificado. Se utiliza en el servidor para descifrar las comunicaciones cifradas con la clave pública. **Debe mantenerse secreto** y nunca compartirse o exponerse públicamente.
+
+**¿Por qué se usa `-nodes` en laboratorio?**
+El flag `-nodes` (no DES) en el comando OpenSSL indica que **no se cifre la clave privada** con una contraseña. Esto es útil en entornos de laboratorio/desarrollo porque:
+- Permite que Nginx inicie automáticamente sin requerir intervención manual para introducir la contraseña de la clave privada.
+- Simplifica el desarrollo y testing al evitar la gestión de contraseñas adicionales.
+- **En producción NO se recomienda** usar `-nodes`, ya que la clave privada quedaría desprotegida si el archivo es comprometido.
+
+**Generación de certificados (comando utilizado):**
+```bash
+openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+  -keyout nginx-selfsigned.key \
+  -out nginx-selfsigned.crt \
+  -subj "/C=ES/ST=Andalucia/L=Cadiz/O=IES Rafael Alberti/CN=localhost"
+```
+
+**Ubicación de los certificados:**
+- En el host: raíz del proyecto (`./nginx-selfsigned.crt` y `./nginx-selfsigned.key`)
+- En el contenedor: `/etc/ssl/certs/nginx-selfsigned.crt` y `/etc/ssl/private/nginx-selfsigned.key`
+
+**Montaje en docker-compose.yml:**
+```yaml
+volumes:
+  - ./nginx-selfsigned.crt:/etc/ssl/certs/nginx-selfsigned.crt:ro
+  - ./nginx-selfsigned.key:/etc/ssl/private/nginx-selfsigned.key:ro
+```
+
+**Uso en default.conf:**
+```nginx
+server {
+  listen 443 ssl;
+  ssl_certificate     /etc/ssl/certs/nginx-selfsigned.crt;
+  ssl_certificate_key /etc/ssl/private/nginx-selfsigned.key;
+  # ... resto de configuración
+}
+```
+
+- Evidencias:
+
+![Listado de certificados en host](evidencias/evidencias-parte2/e-01-ls-certs.png)
+
+![Montaje de certificados en compose](evidencias/evidencias-parte2/e-02-compose-certs.png)
+
+![Configuracion SSL en default conf](evidencias/evidencias-parte2/e-03-defaultconf-ssl.png)
 
 ### f) Comunicaciones seguras
-- Respuesta: Se implementó HTTPS como protocolo de comunicación segura usando los certificados SSL/TLS generados anteriormente. Nginx está configurado para escuchar en el puerto 443 con la directiva `listen 443 ssl` y se establece una política de redirección obligatoria que redirige todas las solicitudes HTTP (puerto 80) a HTTPS (puerto 443) con un código 301, asegurando que todas las comunicaciones cliente-servidor estén cifradas.
-- Evidencias: (No disponibles en carpeta evidencias)
+- Respuesta: Se implementó HTTPS como protocolo de comunicación segura usando los certificados SSL/TLS generados en la sección anterior. La configuración garantiza que todas las comunicaciones entre cliente y servidor estén cifradas.
+
+**Configuración HTTPS (puerto 443):**
+Nginx está configurado para escuchar en el puerto 443 con SSL habilitado:
+```nginx
+server {
+  listen 443 ssl;
+  server_name localhost;
+  
+  ssl_certificate     /etc/ssl/certs/nginx-selfsigned.crt;
+  ssl_certificate_key /etc/ssl/private/nginx-selfsigned.key;
+  
+  # ... resto de configuración del sitio
+}
+```
+
+**Redirección forzada HTTP → HTTPS (código 301):**
+Se configuró un segundo `server` block que escucha en el puerto 80 (HTTP) y redirige automáticamente todas las solicitudes hacia HTTPS con un código 301 (redirección permanente):
+```nginx
+server {
+  listen 80;
+  server_name localhost;
+  
+  location / {
+    return 301 https://$server_name:8443$request_uri;
+  }
+}
+```
+
+**¿Por qué usar dos server blocks?**
+Esta es una arquitectura de seguridad común que separa responsabilidades:
+
+1. **Server block en puerto 80 (HTTP):** Actúa como "puerta de entrada" que captura todas las solicitudes HTTP no cifradas y las redirige automáticamente a HTTPS. No sirve ningún contenido directamente.
+
+2. **Server block en puerto 443 (HTTPS):** Es el único que realmente sirve contenido web. Todas las conexiones aquí están cifradas mediante SSL/TLS, protegiendo los datos transmitidos (credenciales, cookies, información sensible).
+
+**Ventajas de esta configuración:**
+- **Seguridad total:** No se sirve contenido sensible por HTTP sin cifrar.
+- **301 Permanent:** Los navegadores y buscadores aprenden la redirección y futuros accesos van directamente a HTTPS.
+- **SEO y compatibilidad:** Los enlaces antiguos HTTP siguen funcionando gracias a la redirección automática.
+- **Prevención de downgrades:** No hay forma de acceder al sitio por HTTP sin cifrar.
+
+**Puertos configurados en docker-compose.yml:**
+- `8080:80` → Puerto HTTP que redirige a HTTPS
+- `8443:443` → Puerto HTTPS que sirve el contenido cifrado
+
+- Evidencias:
+
+![Acceso HTTPS funcionando](evidencias/evidencias-parte2/f-01-https.png)
+
+![Redireccion 301 en Network](evidencias/evidencias-parte2/f-02-301-network.png)
+
 
 ### g) Documentacion
 - Respuesta: Se ha documentado todo el proceso en este archivo (`DESPLIEGUE.md`) y en el archivo `README_VOLCADO.md`, que incluye: explicación de decisiones técnicas, justificación de cada paso, checklist de requisitos cumplidos, comandos utilizados, configuración completa de `docker-compose.yml` y `default.conf`, estructura del proyecto, y evidencias fotográficas de cada punto. La documentación es clara, estructura y proporciona una guía completa para entender, reproducir y mantener la solución.
