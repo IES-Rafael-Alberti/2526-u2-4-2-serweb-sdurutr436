@@ -16,8 +16,8 @@ Montar una infraestructura `inmutable` con Docker Compose que replique el escena
 ### EVIDENCIAS (CAPTURAS) PARA ESTE PASO
 Estas capturas encajan con la checklist de evidencias (especialmente para demostrar contenedores activos y mapeo de puertos).
 
-- ![Contenedores docker lanzados](img/docker-ps-contenedores.png)
-- ![Index básico para demostrar que la confgiruación funciona](img/pagina-nginx-basica-demostracion.png)
+- ![Contenedores docker lanzados](evidencias/docker-ps-contenedores.png)
+- ![Index básico para demostrar que la confgiruación funciona](evidencias/pagina-nginx-basica-demostracion.png)
 
 Código usado:
 
@@ -84,7 +84,7 @@ En el *Gestor de sitios* en Filezilla se crea una entrada con:
 - Usuario: ``daw`` configurado para mi caso.
 - Contrseña: ``1234``.
 
-![Configuración en FileZilla](img/configuracion-filezilla.png)
+![Configuración en FileZilla](evidencias/configuracion-filezilla.png)
 
 ## DESPLIEGUE DE LAS DOS WEBS (SEGUN LA PRÁCTICA)
 La práctica exige desplegar dos aplicaciones web estáticas:
@@ -97,11 +97,11 @@ La práctica exige desplegar dos aplicaciones web estáticas:
 
 Carpeta con el contenido, se debe hacer click derecho sobre el contenido en el hueco de abajo a la izquierda, señalando todos los archivos, y pulsar en subir:
 
-![Contenido de la carpeta de static-webstie-example](img/contenido-localhost-pagina1.png)
+![Contenido de la carpeta de static-webstie-example](evidencias/contenido-localhost-pagina1.png)
 
 Una vez subido, se verá como queda en el hueco de abajo a la derecha. Luego abriendo ``localhost:8080``:
 
-![Página 1 funcionando: static-website-example](img/contenido-localhost-pagina1.png)
+![Página 1 funcionando: static-website-example](evidencias/contenido-localhost-pagina1.png)
 
 2. Web secundaria (subcarpeta /reloj):
 - Repositorio del que se saca: 'https://github.com/ArchiDep/static-clock-website'
@@ -109,15 +109,15 @@ Una vez subido, se verá como queda en el hueco de abajo a la derecha. Luego abr
 - En FileZilla: se crea primero la carpeta en la raiz llamada ``/reloj`` y se sube dentro el contenido del repositorio del reloj (deja su ``index.html`` en la raiz de ``/reloj`` lo cual crea esa ruta).
 - Comprobación de los pasos dados:
 
-![Carpeta reloj creada](img/reloj-desde-filezilla.png)
+![Carpeta reloj creada](evidencias/reloj-desde-filezilla.png)
 
 Una vez creada, clicamos en ella para que sea la nueva carpeta donde se suben cosas. Mismo sistema de la página 1, localizar la carpeta, ver sus archivos, seleccionar, clic derecho, subir.
 
-![Pagina reloj desde filezilla](img/pagina-reloj-desde-filezilla.png)
+![Pagina reloj desde filezilla](evidencias/pagina-reloj-desde-filezilla.png)
 
 Luego entramos en el navegador a la ruta: ``localhost:8080/reloj`` y vemos:
 
-![Pagina reloj funcionando en localhost:8080/reloj](img/reloj-funcionando-8080.png)
+![Pagina reloj funcionando en localhost:8080/reloj](evidencias/reloj-funcionando-8080.png)
 
 Que funciona perfectamente.
 
@@ -142,40 +142,40 @@ CHECKLIST
 FASE 1: INSTALACION Y CONFIGURACION
 
 [✅] 1) Servicio Nginx activo con ``docker compose ps``. Alpine no trae ``service``.
-![Servicio activo con docker compose ps](img/img-checklist/comprobacion-docker-compose-ps.png)
+![Servicio activo con docker compose ps](evidencias/evidencias-checklist/comprobacion-docker-compose-ps.png)
 
 [✅] 2) Configuracion cargada.
-![Configuracion cargada](img/img-checklist/comprobacion-listado-conf.png)
+![Configuracion cargada](evidencias/evidencias-checklist/comprobacion-listado-conf.png)
 
 [✅] 3) Resolucion de nombres (/etc/hosts).
 
-![Comandos de Windows para la resolución de nombres](img/img-checklist/comandos-para-añadir-p41.local.png)
+![Comandos de Windows para la resolución de nombres](evidencias/evidencias-checklist/comandos-para-añadir-p41.local.png)
 
-![Acceso a través de p41 hosts](img/img-checklist/acceso-a-traves-de-p41-hosts.png)
+![Acceso a través de p41 hosts](evidencias/evidencias-checklist/acceso-a-traves-de-p41-hosts.png)
 
 [✅] 4) Contenido web principal visible (CloudAcademy) en vez de la pagina por defecto.
 
-![Pagina CloudAcademy en 8080](img/img-checklist/demostracion-pagina-8080.png)
+![Pagina CloudAcademy en 8080](evidencias/evidencias-checklist/demostracion-pagina-8080.png)
 
 FASE 2: TRANSFERENCIA SFTP (FILEZILLA)
 
 [✅] 5) Conexion SFTP exitosa.
-![Conexion filezilla correcta](img/img-checklist/filezilla-conexion-correcta.png)
+![Conexion filezilla correcta](evidencias/evidencias-checklist/filezilla-conexion-correcta.png)
 
 [✅] 6) Permisos de escritura OK (sin 'Permission denied').
-![Pagina de Reloj añadida con permisos de escritura](img/pagina-reloj-desde-filezilla.png)
+![Pagina de Reloj añadida con permisos de escritura](evidencias/pagina-reloj-desde-filezilla.png)
 
 FASE 3: INFRAESTRUCTURA DOCKER
 [✅] 7) Contenedores activos simultaneamente (Nginx + SFTP) y puertos mapeados.
 
 El ejemplo de recreación ya demuestra que los contenedores están activos simultaneamente
-![Contenedores funcionando simultaneamente](img/recreacion-contenedores-docker.png)
+![Contenedores funcionando simultaneamente](evidencias/recreacion-contenedores-docker.png)
 
 [✅] 8) Persistencia (volumen compartido): lo que se sube por SFTP se ve en la web.
 Existen varias capturas a lo largo del documento que ya lo demuestran.
 
 [✅] 9) Despliegue multi-sitio: reloj en subcarpeta.
-![Reloj funcionando desde subcarpeta (se demuestra por la ruta)](img/reloj-desde-filezilla.png)
+![Reloj funcionando desde subcarpeta (se demuestra por la ruta)](evidencias/reloj-desde-filezilla.png)
 
 FASE 4: SEGURIDAD HTTPS
 
@@ -253,7 +253,7 @@ C:.
 │       nginx-selfsigned.crt
 │       nginx-selfsigned.key
 │       
-├───img
+├───evidencias
 │   │   conexion-certificado-indica-no-seguro.png
 │   │   conexion-existosa-filezilla.png
 │   │   configuracion-filezilla.png
@@ -270,7 +270,7 @@ C:.
 │   │   reloj-desde-filezilla.png
 │   │   reloj-funcionando-8080.png
 │   │   
-│   └───img-checklist
+│   └───evidencias-checklist
 │           acceso-a-traves-de-p41-hosts.png
 │           comandos-para-añadir-p41.local.png
 │           comprobacion-docker-compose-ps.png

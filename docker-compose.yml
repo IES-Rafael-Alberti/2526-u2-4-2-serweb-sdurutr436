@@ -6,10 +6,10 @@ services:
       - '8080:80'
       - '8443:443'
     volumes:
-      - ./www:/usr/share/nginx/html:ro
+      - shared-data:/usr/share/nginx/html:ro
       - ./default.conf:/etc/nginx/conf.d/default.conf:ro
-      - ./certs/nginx-selfsigned.crt:/etc/ssl/certs/nginx-selfsigned.crt:ro
-      - ./certs/nginx-selfsigned.key:/etc/ssl/private/nginx-selfsigned.key:ro
+      - ./nginx-selfsigned.crt:/etc/ssl/certs/nginx-selfsigned.crt:ro
+      - ./nginx-selfsigned.key:/etc/ssl/private/nginx-selfsigned.key:ro
     depends_on:
       - sftp
 
@@ -20,4 +20,7 @@ services:
       - '2222:22'
     command: 'daw:1234:1001:1001:upload'
     volumes:
-      - ./www:/home/daw/upload
+      - shared-data:/home/daw/upload
+
+volumes:
+  shared-data:
