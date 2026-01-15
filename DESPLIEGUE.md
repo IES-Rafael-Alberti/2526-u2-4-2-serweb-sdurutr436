@@ -354,20 +354,348 @@ Esta es una arquitectura de seguridad común que separa responsabilidades:
 
 
 ### g) Documentacion
-- Respuesta: Se ha documentado todo el proceso en este archivo (`DESPLIEGUE.md`) y en el archivo `README_VOLCADO.md`, que incluye: explicación de decisiones técnicas, justificación de cada paso, checklist de requisitos cumplidos, comandos utilizados, configuración completa de `docker-compose.yml` y `default.conf`, estructura del proyecto, y evidencias fotográficas de cada punto. La documentación es clara, estructura y proporciona una guía completa para entender, reproducir y mantener la solución.
-- Evidencias: enlaces a este documento y a [README_VOLCADO.md](README_VOLCADO.md) que contiene documentación detallada de todo el proceso.
+- Respuesta: Este documento (`DESPLIEGUE.md`) constituye la documentación completa del proyecto, incluyendo configuración, administración segura y recomendaciones. A continuación se presenta un resumen estructurado:
+
+**1. Arquitectura del sistema:**
+- **Servicios:** 
+  - `web` → Nginx Alpine (servidor web con HTTPS)
+  - `sftp` → atmoz/sftp:alpine (servidor de transferencia de archivos)
+- **Puertos expuestos:**
+  - `8080:80` → HTTP (redirige a HTTPS)
+  - `8443:443` → HTTPS (contenido cifrado)
+  - `2222:22` → SFTP (transferencia de archivos)
+- **Volúmenes:**
+  - `shared-data` → Volumen nombrado compartido entre web (`/usr/share/nginx/html`) y sftp (`/home/daw/upload`)
+  - Bind mounts para configuración: `default.conf`, certificados SSL (`.crt` y `.key`), archivo de credenciales (`.htpasswd`)
+
+**2. Configuración de Nginx:**
+- **Ubicación:** `default.conf` montado en `/etc/nginx/conf.d/default.conf`
+- **Server blocks:**
+  - Bloque puerto 80: Redirección HTTP→HTTPS con código 301
+  - Bloque puerto 443: Servidor principal con SSL, security headers, y rutas para `/`, `/reloj` y `/admin`
+- **Directivas clave:**
+  - `root /usr/share/nginx/html` → Directorio base del contenido web
+  - `ssl_certificate` y `ssl_certificate_key` → Rutas a certificados SSL
+  - `port_in_redirect on` y `absolute_redirect off` → Preservan puerto 8443 en redirecciones
+  - `add_header` → Inyecta cabeceras de seguridad (X-Content-Type-Options, X-Frame-Options, CSP)
+- **Multi-sitio:** Implementación de `/reloj` mediante bloques `location` independientes con `try_files`
+
+**3. Seguridad implementada:**
+- **Certificados SSL/TLS:** Autofirmados generados con OpenSSL, válidos por 365 días
+- **HTTPS obligatorio:** Redirección 301 de HTTP a HTTPS en todas las solicitudes
+- **Security headers (opción B2):**
+  - `X-Content-Type-Options: nosniff` → Previene MIME-sniffing
+  - `X-Frame-Options: DENY` → Previene clickjacking
+  - `Content-Security-Policy` → Controla recursos permitidos (mitiga XSS)
+- **Autenticación `/admin`:**
+  - HTTP Basic Auth con archivo `.htpasswd` (bcrypt)
+  - Usuario: `admin` / Contraseña: `Admin1234!`
+  - Ruta protegida mientras `/` y `/reloj` permanecen públicas
+
+**4. Administración y logs:**
+- **Validación de configuración:** `docker compose exec web nginx -t`
+- **Recarga sin downtime:** `docker compose exec web nginx -s reload`
+- **Logs en tiempo real:** `docker compose logs -f web`
+- **Análisis de métricas:** Comandos `awk` sobre `/var/log/nginx/access.log` para extraer URLs, códigos HTTP y errores 404
+
+**5. Recomendaciones de seguridad:**
+- ✅ Usar certificados de CA válida en producción (Let's Encrypt)
+- ✅ Cifrar la clave privada con contraseña (eliminar flag `-nodes`)
+- ✅ Cambiar credenciales por defecto de SFTP y admin
+- ✅ Implementar fail2ban para prevenir ataques de fuerza bruta
+- ✅ Habilitar HSTS (Strict-Transport-Security header) en producción
+- ✅ Actualizar regularmente las imágenes Docker (nginx:alpine, atmoz/sftp:alpine)
+
+**6. Evidencias:**
+- **Parte 1:** 11 evidencias de instalación, configuración, SFTP, Docker, y HTTPS (secciones 1-11)
+- **Parte 2:** Evidencias de criterios RA2 (a-j) con capturas de comandos, configuración y navegador
+
+- Evidencias: Este documento completo + [README_VOLCADO.md](README_VOLCADO.md)
+
 
 ### h) Ajustes para implantacion de apps
-- Respuesta: Se han realizado ajustes en la configuración de Nginx para permitir el despliegue de aplicaciones web estáticas. Estos ajustes incluyen: configuración de la raíz del documento (`root /usr/share/nginx/html`), directiva de índice por defecto (`index index.html`), bloque `location` con `try_files` para servir archivos estáticos o retornar 404 si no existen, y soporte para múltiples aplicaciones en subcarpetas (como `/reloj`). Estos ajustes permiten alojar múltiples aplicaciones web estáticas de forma segura y eficiente.
-- Evidencias: (No disponibles en carpeta evidencias)
+- Respuesta: Se realizaron ajustes específicos en la configuración de Nginx para permitir el despliegue de múltiples aplicaciones web estáticas en diferentes rutas.
+
+**1. Despliegue de segunda app en /reloj - Rutas relativas vs absolutas:**
+
+El despliegue de la aplicación del reloj en la subcarpeta `/reloj` implica consideraciones importantes sobre rutas:
+
+- **Estructura en el servidor:**
+  ```
+  /usr/share/nginx/html/          # Raíz configurada en Nginx
+  ├── index.html                   # App principal (CloudAcademy)
+  ├── assets/                      # Recursos de app principal
+  ├── images/                      
+  └── reloj/                       # Subcarpeta para segunda app
+      ├── index.html               # App secundaria (Reloj)
+      ├── script.js
+      └── style.css
+  ```
+
+- **Rutas relativas en /reloj/index.html:**
+  ```html
+  <!-- ✅ CORRECTO - Rutas relativas desde /reloj/ -->
+  <link rel="stylesheet" href="style.css">
+  <script src="script.js"></script>
+  
+  <!-- ❌ INCORRECTO - Rutas absolutas desde raíz -->
+  <link rel="stylesheet" href="/style.css">  <!-- Buscaría en /usr/share/nginx/html/style.css -->
+  <script src="/script.js"></script>
+  ```
+
+- **Problema común:** Si la app del reloj usa rutas absolutas (`/style.css`), Nginx buscará esos archivos en la raíz del servidor (`/usr/share/nginx/html/style.css`) en lugar de en `/reloj/style.css`, causando errores 404.
+
+- **Solución:** La aplicación del reloj debe usar rutas relativas o tener todos sus recursos autocontenidos en la carpeta `/reloj`.
+
+**2. Configuración de Nginx para múltiples apps:**
+
+```nginx
+root /usr/share/nginx/html;
+index index.html;
+
+location / {
+  try_files $uri $uri/ =404;
+}
+
+location /reloj {
+  try_files $uri $uri/ =404;
+}
+```
+
+- La directiva `root` es global, todas las apps comparten la misma raíz.
+- Cada `location` gestiona su propia subcarpeta automáticamente.
+- `try_files` intenta servir el archivo solicitado, luego como directorio, y finalmente retorna 404.
+
+**3. Problema típico de permisos SFTP y solución:**
+
+**Problema encontrado:**
+Al subir archivos por SFTP al directorio `/home/daw/upload` (que es el volumen compartido), los archivos se creaban con permisos restrictivos (`644` o `755`) pero pertenecían al usuario `daw` (UID 1001). Sin embargo, **Nginx corre como usuario `nginx`** dentro del contenedor y podía tener problemas para leer archivos si los permisos no eran adecuados. Además, al intentar **eliminar archivos desde FileZilla**, aparecía el error:
+
+```
+Error: Permission denied
+Error: Failed to delete file
+```
+
+**Causa del problema:**
+- El usuario SFTP (`daw`) no tenía permisos de escritura completos sobre el directorio `/home/daw/upload`.
+- Los archivos/carpetas heredaban permisos restrictivos que impedían operaciones de escritura/eliminación.
+
+**Solución aplicada:**
+```bash
+docker compose exec sftp chmod 777 /home/daw/upload
+```
+
+Este comando:
+- Ejecuta `chmod 777` dentro del contenedor SFTP
+- Otorga permisos completos (lectura, escritura, ejecución) a propietario, grupo y otros
+- Permite que el usuario `daw` pueda crear, modificar y **eliminar** archivos/carpetas sin restricciones
+
+**Nota de seguridad:**
+- `chmod 777` es apropiado para entornos de desarrollo/laboratorio
+- En producción debería usarse una configuración más restrictiva (ej: `chmod 775` con el usuario SFTP y Nginx en el mismo grupo)
+
+**4. Ajustes adicionales implementados:**
+
+- **Montaje del volumen como read-only en Nginx:** `shared-data:/usr/share/nginx/html:ro` → Previene modificaciones accidentales desde el contenedor web
+- **Índice por defecto:** `index index.html` → Nginx busca automáticamente `index.html` al acceder a directorios
+- **try_files:** Maneja correctamente archivos estáticos y retorna 404 si no existen (en lugar de listar directorios)
+- **port_in_redirect on:** Preserva el puerto 8443 en redirecciones internas
+
+- Evidencias:
+
+![Sitio principal funcionando](evidencias/evidencias-parte2/h-01-root.png)
+
+![Sitio reloj funcionando](evidencias/evidencias-parte2/h-02-reloj.png)
+
 
 ### i) Virtualizacion en despliegue
-- Respuesta: Se ha implementado la solución completa usando Docker y Docker Compose, creando dos contenedores virtualizados independientes: uno para Nginx (servicio web) y otro para SFTP (servicio de transferencia). La virtualización permite encapsular la aplicación con todas sus dependencias en contenedores reutilizables, facilitando el despliegue, escalado y mantenimiento. Los contenedores se orquestan mediante `docker-compose.yml`, que define servicios, puertos, volúmenes compartidos y dependencias entre contenedores, permitiendo un despliegue reproducible y consistente.
-- Evidencias: (No disponibles en carpeta evidencias)
+- Respuesta: Se implementó la solución completa usando Docker y Docker Compose, aprovechando las ventajas de la virtualización mediante contenedores para crear un entorno de despliegue moderno, reproducible y portable.
+
+**1. Diferencia operativa: Instalación nativa vs Contenedores**
+
+| Aspecto | Instalación Nativa en SO | Contenedores Efímeros + Volúmenes |
+|---------|-------------------------|-----------------------------------|
+| **Instalación** | Instalar Nginx y SFTP directamente en el SO host (apt install, yum install, etc.). Requiere privilegios de administrador y modificaciones al sistema base. | Las imágenes Docker ya contienen todo preinstalado. Solo se necesita `docker compose up`. No contamina el SO host. |
+| **Configuración** | Archivos de configuración en ubicaciones del sistema (`/etc/nginx/`, `/etc/ssh/`). Modificar requiere acceso root. | Configuración inyectada mediante volúmenes. Se edita en el proyecto y se monta en el contenedor. Cambios sin privilegios elevados. |
+| **Persistencia** | Los datos persisten directamente en el sistema de archivos del host (`/var/www/`, `/srv/`). | Contenedores son **efímeros** (se pueden destruir y recrear sin pérdida). Los datos persisten en **volúmenes Docker** independientes del ciclo de vida del contenedor. |
+| **Dependencias** | Conflictos potenciales con otras versiones instaladas. Difícil tener múltiples versiones de Nginx simultáneamente. | Cada contenedor tiene sus propias dependencias aisladas. Múltiples versiones de Nginx pueden coexistir sin conflictos. |
+| **Portabilidad** | Requiere documentación manual y scripts de instalación. Difícil replicar el entorno exacto en otra máquina. | `docker-compose.yml` define toda la infraestructura. Replicar el entorno en cualquier máquina con Docker es trivial (`docker compose up`). |
+| **Escalabilidad** | Escalar horizontalmente requiere configurar manualmente múltiples servidores, balanceadores, etc. | Escalar es tan simple como `docker compose up --scale web=3`. Orquestadores como Kubernetes facilitan escalado automático. |
+| **Actualizaciones** | Actualizar Nginx puede romper la aplicación. Requiere gestión de paquetes del SO, potencialmente reiniciando servicios. | Cambiar de versión es editar `image: nginx:1.25` a `image: nginx:1.26` y hacer `docker compose up -d`. Rollback instantáneo si hay problemas. |
+| **Aislamiento** | Los servicios comparten recursos del SO. Un problema en Nginx puede afectar otros servicios. | Cada contenedor está aislado. Un crash de Nginx no afecta SFTP ni otros contenedores. Docker maneja recursos (CPU, RAM) por contenedor. |
+| **Limpieza** | Desinstalar deja residuos en el sistema. Difícil eliminar completamente todas las dependencias. | `docker compose down -v` elimina contenedores y volúmenes. Limpieza completa sin dejar rastros en el sistema. |
+
+**2. Arquitectura implementada con Docker Compose:**
+
+```yaml
+services:
+  web:                                    # Contenedor Nginx
+    image: nginx:alpine                   # Imagen base ligera
+    container_name: p41_web
+    ports:
+      - '8080:80'                          # HTTP
+      - '8443:443'                         # HTTPS
+    volumes:
+      - shared-data:/usr/share/nginx/html:ro    # Volumen compartido (solo lectura)
+      - ./default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx-selfsigned.crt:/etc/ssl/certs/nginx-selfsigned.crt:ro
+      - ./nginx-selfsigned.key:/etc/ssl/private/nginx-selfsigned.key:ro
+      - ./.htpasswd:/etc/nginx/.htpasswd:ro
+    depends_on:
+      - sftp                               # Inicia después de SFTP
+
+  sftp:                                   # Contenedor SFTP
+    image: atmoz/sftp:alpine
+    container_name: p41_sftp
+    ports:
+      - '2222:22'                          # SFTP
+    command: 'daw:1234:1001:1001:upload'   # Usuario:Pass:UID:GID:Carpeta
+    volumes:
+      - shared-data:/home/daw/upload       # Volumen compartido (lectura/escritura)
+
+volumes:
+  shared-data:                             # Volumen nombrado gestionado por Docker
+```
+
+**3. Ventajas de la virtualización aplicadas:**
+
+✅ **Reproducibilidad:** El mismo `docker-compose.yml` funciona en Windows, Linux, macOS
+✅ **Aislamiento:** Los contenedores no interfieren entre sí ni con el sistema host
+✅ **Portabilidad:** Todo el proyecto (código + infraestructura) viaja junto
+✅ **Eficiencia:** Contenedores Alpine ocupan ~10MB vs instalación completa de ~200MB
+✅ **Orquestación:** Docker Compose gestiona inicio, reinicio, dependencias automáticamente
+✅ **Versionado:** La infraestructura está versionada en Git junto con el código
+✅ **Desarrollo = Producción:** Mismo entorno en laptop del desarrollador y servidor de producción
+
+**4. Persistencia mediante volúmenes:**
+
+- **Volumen nombrado `shared-data`:** Gestionado por Docker, sobrevive a la destrucción de contenedores. Compartido entre Nginx (lectura) y SFTP (escritura).
+- **Bind mounts:** Archivos del proyecto montados directamente en contenedores (configuración, certificados). Cambios se reflejan inmediatamente.
+
+**5. Comandos de gestión:**
+
+```bash
+docker compose up -d              # Iniciar servicios en background
+docker compose ps                 # Ver estado de contenedores
+docker compose logs -f web        # Ver logs en tiempo real
+docker compose exec web sh        # Acceder al shell del contenedor
+docker compose restart web        # Reiniciar un servicio
+docker compose down               # Detener y eliminar contenedores
+docker compose down -v            # Detener y eliminar contenedores + volúmenes
+```
+
+- Evidencias:
+
+![Contenedores activos con puertos](evidencias/evidencias-parte2/i-01-compose-ps.png)
+
 
 ### j) Logs: monitorizacion y analisis
-- Respuesta: Se implementó monitorización de logs utilizando los comandos de Docker Compose para acceder a los logs en tiempo real de los contenedores. Los logs de Nginx incluyen información sobre solicitudes HTTP (método, ruta, código de respuesta, tiempo de procesamiento), lo que permite identificar errores, monitorear el acceso y analizar el comportamiento de la aplicación. Mediante `docker compose logs -f` se pueden ver los logs en vivo, y analizando patrones de acceso es posible detectar problemas de configuración, intentos de acceso no autorizados, y rendimiento del servicio.
-- Evidencias: (No disponibles en carpeta evidencias)
+- Respuesta: Se implementó un sistema completo de monitorización y análisis de logs utilizando las capacidades integradas de Docker Compose y comandos Unix para procesamiento de logs de Nginx.
+
+**1. Generación de tráfico para testing:**
+
+Para demostrar la monitorización, se generó tráfico de prueba y errores intencionales:
+
+```powershell
+# Generar 20 solicitudes exitosas
+for ($i=1; $i -le 20; $i++) { curl.exe -k -s -o nul "https://localhost:8443/" }
+
+# Generar 10 errores 404
+for ($i=1; $i -le 10; $i++) { curl.exe -k -s -o nul "https://localhost:8443/no-existe-$i" }
+```
+
+**2. Monitorización en tiempo real:**
+
+Docker Compose permite ver logs de contenedores en tiempo real:
+
+```bash
+docker compose logs -f web
+```
+
+Este comando:
+- `logs` → Muestra los logs del contenedor
+- `-f` (follow) → Continúa mostrando logs en tiempo real (similar a `tail -f`)
+- `web` → Especifica el servicio (si se omite, muestra logs de todos los servicios)
+
+**Formato de logs de Nginx (access.log):**
+```
+172.20.0.1 - - [15/Jan/2026:08:30:45 +0000] "GET / HTTP/1.1" 200 5432 "-" "curl/8.9.1"
+172.20.0.1 - - [15/Jan/2026:08:30:46 +0000] "GET /no-existe-1 HTTP/1.1" 404 153 "-" "curl/8.9.1"
+```
+
+Campos del log:
+- **IP cliente:** 172.20.0.1
+- **Timestamp:** [15/Jan/2026:08:30:45 +0000]
+- **Método y ruta:** "GET / HTTP/1.1"
+- **Código respuesta:** 200 (éxito) o 404 (no encontrado)
+- **Bytes enviados:** 5432
+- **User-Agent:** "curl/8.9.1"
+
+**3. Extracción de métricas desde el contenedor:**
+
+Nginx almacena logs en `/var/log/nginx/access.log`. Se pueden analizar con comandos Unix desde dentro del contenedor:
+
+**a) Top URLs más solicitadas:**
+```bash
+docker compose exec web sh -c "awk '{print \$7}' /var/log/nginx/access.log | sort | uniq -c | sort -nr | head"
+```
+Muestra qué rutas (`/`, `/reloj`, `/admin`, etc.) reciben más tráfico.
+
+**b) Distribución de códigos HTTP:**
+```bash
+docker compose exec web sh -c "awk '{print \$9}' /var/log/nginx/access.log | sort | uniq -c | sort -nr | head"
+```
+Muestra cuántas respuestas 200 (OK), 301 (redirect), 401 (unauthorized), 404 (not found), etc.
+
+**c) URLs que generan 404:**
+```bash
+docker compose exec web sh -c "awk '\$9==404 {print \$7}' /var/log/nginx/access.log | sort | uniq -c | sort -nr | head"
+```
+Lista las rutas que no existen y cuántas veces fueron solicitadas (útil para detectar enlaces rotos o escaneos maliciosos).
+
+**Explicación de los comandos awk:**
+- `awk '{print $7}'` → Extrae el campo 7 (la URL solicitada)
+- `awk '{print $9}'` → Extrae el campo 9 (código de respuesta HTTP)
+- `awk '$9==404 {print $7}'` → Filtra solo líneas con código 404 y extrae la URL
+- `sort` → Ordena las líneas
+- `uniq -c` → Cuenta ocurrencias únicas
+- `sort -nr` → Ordena numéricamente en orden inverso (más a menos)
+- `head` → Muestra solo las primeras 10 líneas
+
+**4. Casos de uso del análisis de logs:**
+
+✅ **Detección de problemas de configuración:** URLs con muchos 404 pueden indicar enlaces rotos o referencias incorrectas en HTML/CSS.
+
+✅ **Monitoreo de accesos no autorizados:** Múltiples 401 en `/admin` pueden indicar intentos de fuerza bruta.
+
+✅ **Análisis de rendimiento:** Identificar las rutas más visitadas ayuda a optimizar recursos (cache, CDN).
+
+✅ **Seguridad:** Detectar patrones de escaneo automático (rutas como `/phpmyadmin`, `/.env`, `/wp-admin`) que indican intentos de explotación.
+
+✅ **Auditoría:** Logs permanentes permiten investigar incidentes históricos.
+
+**5. Comandos adicionales útiles:**
+
+```bash
+# Ver últimas 50 líneas del access log
+docker compose exec web tail -50 /var/log/nginx/access.log
+
+# Ver log de errores (problemas de configuración, permisos, etc.)
+docker compose exec web tail -f /var/log/nginx/error.log
+
+# Buscar accesos a ruta específica
+docker compose exec web grep "/admin" /var/log/nginx/access.log
+
+# Contar total de solicitudes en el día
+docker compose exec web wc -l /var/log/nginx/access.log
+```
+
+- Evidencias:
+
+![Logs en tiempo real](evidencias/evidencias-parte2/j-01-logs-follow.png)
+
+![Extraccion de metricas](evidencias/evidencias-parte2/j-02-metricas.png)
+
 
 ---
 
